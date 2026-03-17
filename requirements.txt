@@ -2,3 +2,7 @@ torch
 torchaudio
 librosa
 sentencepiece
+matplotlib
+ipython
+pandas
+numpy
