@@ -2,7 +2,7 @@
 import torch.nn as nn 
 import torch
 from torch_optimizer import NovoGrad 
-from model import QuartzNetBxR, collate_fn
+from model.model import QuartzNetBxR, collate_fn
 from torchaudio.datasets import LIBRISPEECH
 from torch.utils.data import DataLoader
 root = "/home/student/GOATS422/Notarius/Datasets"
