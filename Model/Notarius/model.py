@@ -1,32 +1,11 @@
 #imports
-import torchaudio
-import random
-import matplotlib.pyplot as plt
-import sys
-from torch.utils.data import DataLoader
 import torch.nn as nn 
 import torch
+from torchaudio.transforms import MelSpectrogram, AmplitudeToDB, SpeedPerturbation
 from torch.nn.utils.rnn import pad_sequence
-from torch_optimizer import NovoGrad 
-
+#settings
 torch.set_num_threads(24)
-
-root = "/home/student/GOATS422/Notarius/Datasets"
-
-train_ds = torchaudio.datasets.LIBRISPEECH(root=root, url="train-clean-100", download=False)
-val_ds   = torchaudio.datasets.LIBRISPEECH(root=root, url="dev-clean",       download=False)
-test_ds  = torchaudio.datasets.LIBRISPEECH(root=root, url="test-clean",      download=False)
-
-
-spec_transform = nn.Sequential(
-    torchaudio.transforms.MelSpectrogram(n_fft=400, sample_rate=16000,  hop_length=160, n_mels=64),
-    torchaudio.transforms.AmplitudeToDB(stype="power", top_db=80)
-)
-
-speed_perturb = torchaudio.transforms.SpeedPerturbation(
-    orig_freq=16000, 
-    factors=[0.9, 1.0, 1.1]
-)
+torch.backends.cudnn.benchmark = True
 
 
 # define vocabulary
@@ -38,6 +17,16 @@ num_classes = len(chars) + 1            # 29 total
 char2idx = {c: i for i, c in enumerate(chars)}
 idx2char = {i: c for i, c in enumerate(chars)}
 
+spec_transform = nn.Sequential(
+    MelSpectrogram(n_fft=400, sample_rate=16000,  hop_length=160, n_mels=64),
+    AmplitudeToDB(stype="power", top_db=80)
+)
+
+speed_perturb = SpeedPerturbation(
+    orig_freq=16000, 
+    factors=[0.9, 1.0, 1.1]
+)
+
 def encode(transcript):
     transcript = transcript.lower()
     return [char2idx[c] for c in transcript if c in char2idx]
@@ -48,7 +37,7 @@ def decode(indices):
 # collate function: pad waveforms and keep transcripts as targets while also returning the orignal lengths of data
 def collate_fn(batch):
     waveforms, _, transcripts, *_ = zip(*batch)
-
+    #pertubaed waveforms making them 10% slower or faster
     perturbed_waveforms = [speed_perturb(w)[0] for w in waveforms]
     waveform_lengths = torch.tensor([w.shape[-1] for w in perturbed_waveforms], dtype=torch.long)
     input_lengths = (waveform_lengths // 160) + 1 #160 because hop length is 160
@@ -66,12 +55,6 @@ def collate_fn(batch):
     targets = pad_sequence(encoded, batch_first=True, padding_value=0)
 
     return tensors, targets, input_lengths, target_lengths
-
-#initialize dataloader
-train_loader = DataLoader(train_ds, batch_size=64, shuffle=True,  collate_fn=collate_fn, num_workers=24, pin_memory=True)
-val_loader   = DataLoader(val_ds,   batch_size=64, shuffle=False, collate_fn=collate_fn, num_workers=24)
-test_loader  = DataLoader(test_ds,  batch_size=64, shuffle=False, collate_fn=collate_fn, num_workers=24)
-
 class TSCConv(nn.Module):
     def __init__(self, in_channel, out_channel, kernel_size, use_relu=True):
         super().__init__()
@@ -141,81 +124,3 @@ class QuartzNetBxR(nn.Module):
         return x.log_softmax(dim=2)
 
 
-
-def train_model(B=5, R=5, num_epochs=10):
-    # Initialize model, optimizer, and loss function
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-
-    model = QuartzNetBxR(n_mels=64, n_classes=num_classes, B=B, R=R).to(device)
-    optimizer = NovoGrad(model.parameters(), lr=0.01, betas=(0.95, 0.5), weight_decay=0.001)
-    criterion = nn.CTCLoss(blank=blank, zero_infinity=True)
-
-    train_losses = []
-    val_losses = []
-    running_in_notebook = 'ipykernel' in sys.modules
-
-    if not running_in_notebook:
-        plt.ion()
-
-    for epoch in range(num_epochs):
-        # Training
-        model.train()
-        total_train_loss = 0.0
-
-        for batch_idx, (inputs, targets, input_lengths, target_lengths) in enumerate(train_loader):
-            inputs = inputs.to(device)
-            targets = targets.to(device)
-
-            optimizer.zero_grad()
-
-            outputs = model(inputs)
-
-            adjusted_lengths = ((input_lengths - 1) // 2) + 1
-            loss = criterion(outputs, targets, adjusted_lengths, target_lengths)
-
-            loss.backward()
-            optimizer.step()
-            total_train_loss += loss.item()
-
-            if batch_idx % 10 == 0:
-                print(
-                    f"Epoch {epoch+1}/{num_epochs} | "
-                    f"Batch {batch_idx}/{len(train_loader)} | "
-                    f"Batch Loss: {loss.item():.4f}",
-                    end='\r'
-                )
-
-        avg_train_loss = total_train_loss / len(train_loader)
-        train_losses.append(avg_train_loss)
-
-        # Validation
-        model.eval()
-        total_val_loss = 0.0
-        with torch.no_grad():
-            for inputs, targets, input_lengths, target_lengths in val_loader:
-                inputs = inputs.to(device)
-                targets = targets.to(device)
-
-                outputs = model(inputs)
-
-                adjusted_lengths = ((input_lengths - 1) // 2) + 1
-                val_loss = criterion(outputs, targets, adjusted_lengths, target_lengths)
-                total_val_loss += val_loss.item()
-
-        avg_val_loss = total_val_loss / len(val_loader)
-        val_losses.append(avg_val_loss)
-
-        print(
-            f"Epoch {epoch+1}/{num_epochs} complete | "
-            f"Train Loss: {avg_train_loss:.4f} | "
-            f"Val Loss: {avg_val_loss:.4f}"
-        )
-
-
-    return model, train_losses, val_losses
-
-
-if __name__ == "__main__":
-    train_model(B=5, R=5, num_epochs=10)
-    
