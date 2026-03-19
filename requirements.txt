@@ -6,3 +6,4 @@ matplotlib
 ipython
 pandas
 numpy
+torch_optimizer
