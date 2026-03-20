@@ -7,3 +7,4 @@ ipython
 pandas
 numpy
 torch_optimizer
+soundfile

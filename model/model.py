@@ -2,14 +2,18 @@
 import torch.nn as nn
 import torch
 
-
 class TSCConv(nn.Module):
     def __init__(self, in_channel, out_channel, kernel_size, use_relu=True):
         super().__init__()
         padding = (kernel_size - 1) // 2
         layers = [
-            nn.Conv1d(in_channel, in_channel, kernel_size,
-                      padding, groups=in_channel),
+            nn.Conv1d(
+                in_channel,
+                in_channel,
+                kernel_size,
+                padding=padding,
+                groups=in_channel,
+            ),
             nn.Conv1d(in_channel, out_channel, kernel_size=1),
             nn.BatchNorm1d(out_channel),
         ]
