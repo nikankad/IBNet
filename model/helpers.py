@@ -26,7 +26,7 @@ speed_perturb = SpeedPerturbation(
 spec_aug_mask = nn.Sequential(
         torchaudio.transforms.TimeMasking(time_mask_param=30),
         torchaudio.transforms.FrequencyMasking(freq_mask_param=10),
-    )
+)
 
 def spec_aug(spectrogram):
     return spec_aug_mask(spectrogram)
@@ -58,7 +58,7 @@ def collate_fn(batch):
     tensors = tensors.transpose(1, 2).contiguous()           # (B, M, T)
 
     # SpecAug on mel features
-    tensors = spec_aug(tensors)
+    # tensors = spec_aug(tensors)
 
     # Encode transcripts
     encoded = [torch.tensor(encode(t), dtype=torch.long) for t in transcripts]
