@@ -26,6 +26,23 @@ val_loader   = DataLoader(small_val_ds,   batch_size=64, shuffle=False, collate_
 test_loader  = DataLoader(small_test_ds,  batch_size=64, shuffle=False, collate_fn=collate_fn_test, num_workers=2, persistent_workers=True)
 
 
+def _pad_feature_list(inputs, device):
+    batch_size = len(inputs)
+    max_time = max(feat.shape[0] for feat in inputs)
+    n_mels = inputs[0].shape[1]
+    batched = torch.zeros(batch_size, n_mels, max_time, dtype=inputs[0].dtype, device=device)
+    for i, feat in enumerate(inputs):
+        time_len = feat.shape[0]
+        batched[i, :, :time_len] = feat.to(device).transpose(0, 1)
+    return batched
+
+
+def _prepare_targets(targets, device):
+    if isinstance(targets, list):
+        return torch.cat([t.to(device) for t in targets], dim=0)
+    return targets.to(device)
+
+
 def train_model(B=5, R=5, num_epochs=10):
     # Initialize model, optimizer, and loss function
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -52,12 +69,17 @@ def train_model(B=5, R=5, num_epochs=10):
         print(f"\n[Epoch {epoch+1}/{num_epochs}] Training started")
 
         for batch_idx, (inputs, targets, input_lengths, target_lengths) in enumerate(train_loader):
+            if isinstance(inputs, list):
+                inputs = _pad_feature_list(inputs, device)
+            else:
+                inputs = inputs.to(device)
+
+            targets = _prepare_targets(targets, device)
+
             if batch_idx == 0:
                 print(
                     f"First batch shapes | inputs: {tuple(inputs.shape)} | targets: {tuple(targets.shape)}"
                 )
-            inputs = inputs.to(device)
-            targets = targets.to(device)
 
             optimizer.zero_grad()
 
@@ -90,8 +112,12 @@ def train_model(B=5, R=5, num_epochs=10):
         print(f"[Epoch {epoch+1}/{num_epochs}] Validation started")
         with torch.no_grad():
             for val_batch_idx, (inputs, targets, input_lengths, target_lengths) in enumerate(val_loader):
-                inputs = inputs.to(device)
-                targets = targets.to(device)
+                if isinstance(inputs, list):
+                    inputs = _pad_feature_list(inputs, device)
+                else:
+                    inputs = inputs.to(device)
+
+                targets = _prepare_targets(targets, device)
 
                 outputs = model(inputs)
 
