@@ -7,59 +7,12 @@ import torch
 from torch.nn.utils.rnn import pad_sequence
 torch.set_num_threads(24)
 
-# Support for Vertex AI - use env var if available, else use default
 root = os.getenv("DATASET_PATH", "home/student/GOATS422")
-
-train_ds = torchaudio.datasets.LIBRISPEECH(root=root, url="train-clean-100", download=False)
-val_ds   = torchaudio.datasets.LIBRISPEECH(root=root, url="dev-clean",       download=False)
-test_ds  = torchaudio.datasets.LIBRISPEECH(root=root, url="test-clean",      download=False)
-
 
 spec_transform = nn.Sequential(
     torchaudio.transforms.MelSpectrogram(n_fft=400, sample_rate=16000,  hop_length=160, n_mels=64),
     torchaudio.transforms.AmplitudeToDB(stype="power", top_db=80)
 )
-
-# define vocabulary
-chars = "abcdefghijklmnopqrstuvwxyz '"  # 26 + space + apostrophe = 28 chars
-blank = len(chars)                       # 28 = CTC blank token
-num_classes = len(chars) + 1            # 29 total
-
-# char to index
-char2idx = {c: i for i, c in enumerate(chars)}
-idx2char = {i: c for i, c in enumerate(chars)}
-
-def encode(transcript):
-    transcript = transcript.lower()
-    return [char2idx[c] for c in transcript if c in char2idx]
-
-def decode(indices):
-    return ''.join([idx2char[i] for i in indices if i != blank])
-
-# collate function: pad waveforms and keep transcripts as targets while also returning the orignal lengths of data
-def collate_fn(batch):
-    waveforms, _, transcripts, *_ = zip(*batch)
-
-    waveform_lengths = torch.tensor([w.shape[-1] for w in waveforms], dtype=torch.long)
-    input_lengths = (waveform_lengths // 160) + 1 #160 because hop length is 160
-
-    tensors = pad_sequence(
-        [w.squeeze(0) for w in waveforms],
-        batch_first=True
-    ).unsqueeze(1)
-
-    tensors = spec_transform(tensors)
-
-    # encode transcripts to integer tokens
-    encoded = [torch.tensor(encode(t), dtype=torch.long) for t in transcripts]
-    target_lengths = torch.tensor([len(e) for e in encoded], dtype=torch.long)
-    targets = pad_sequence(encoded, batch_first=True, padding_value=0)
-
-    return tensors, targets, input_lengths, target_lengths
-#initialize dataloader
-train_loader = DataLoader(train_ds, batch_size=64, shuffle=True,  collate_fn=collate_fn, num_workers=24, pin_memory=True)
-val_loader   = DataLoader(val_ds,   batch_size=64, shuffle=False, collate_fn=collate_fn, num_workers=24)
-test_loader  = DataLoader(test_ds,  batch_size=64, shuffle=False, collate_fn=collate_fn, num_workers=24)
 
 class TSCConv(nn.Module):
     def __init__(self, in_channel, out_channel, kernel_size, stride=1):

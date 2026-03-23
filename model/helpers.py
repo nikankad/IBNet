@@ -24,7 +24,7 @@ speed_perturb = SpeedPerturbation(
 
 spec_aug_mask = nn.Sequential(
         torchaudio.transforms.FrequencyMasking(freq_mask_param=12),
-        torchaudio.transforms.TimeMasking(20),
+        torchaudio.transforms.TimeMasking(time_mask_param=20),
 )
 
 def spec_aug(spectrogram):
