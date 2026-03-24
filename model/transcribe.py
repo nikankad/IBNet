@@ -67,7 +67,7 @@ def main():
     parser.add_argument("--audio", required=True, help="Path to input wav file")
     parser.add_argument(
         "--checkpoint",
-        default="outputs/checkpoints/best.pt",
+        default="/home/student/GOATS422/Notarius/outputs/checkpoints/best.pt",
         help="Path to model checkpoint (default: outputs/checkpoints/best.pt)",
     )
     parser.add_argument(

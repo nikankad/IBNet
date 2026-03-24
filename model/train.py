@@ -59,6 +59,20 @@ def _save_checkpoint(path: Path, payload: dict):
     torch.save(payload, path)
 
 
+def _build_inference_payload(model, B: int, R: int, epoch: int, best_val_loss: float):
+    return {
+        "epoch": epoch,
+        "best_val_loss": best_val_loss,
+        "model_state_dict": model.state_dict(),
+        "config": {
+            "B": B,
+            "R": R,
+            "n_mels": 64,
+            "n_classes": 29,
+        },
+    }
+
+
 def train_model(B=5, R=5, num_epochs=10, checkpoint_dir="outputs/checkpoints", save_every=10, resume_from=None):
     # Initialize model, optimizer, and loss function
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -93,7 +107,11 @@ def train_model(B=5, R=5, num_epochs=10, checkpoint_dir="outputs/checkpoints", s
             resume_path = checkpoint_dir_path / resume_path
         checkpoint = torch.load(resume_path, map_location=device)
         model.load_state_dict(checkpoint["model_state_dict"])
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        optimizer_state = checkpoint.get("optimizer_state_dict")
+        if optimizer_state is not None:
+            optimizer.load_state_dict(optimizer_state)
+        else:
+            print("Resume checkpoint has no optimizer state; optimizer starts fresh.")
         start_epoch = checkpoint["epoch"] + 1
         train_losses = checkpoint.get("train_losses", [])
         val_losses = checkpoint.get("val_losses", [])
@@ -220,8 +238,16 @@ def train_model(B=5, R=5, num_epochs=10, checkpoint_dir="outputs/checkpoints", s
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             checkpoint_payload["best_val_loss"] = best_val_loss
+
             best_ckpt_path = checkpoint_dir_path / "best.pt"
-            _save_checkpoint(best_ckpt_path, checkpoint_payload)
+            best_payload = _build_inference_payload(
+                model=model,
+                B=B,
+                R=R,
+                epoch=epoch,
+                best_val_loss=best_val_loss,
+            )
+            _save_checkpoint(best_ckpt_path, best_payload)
             print(f"New best checkpoint: {best_ckpt_path}")
 
         if save_every > 0 and ((epoch + 1) % save_every == 0):
@@ -232,18 +258,14 @@ def train_model(B=5, R=5, num_epochs=10, checkpoint_dir="outputs/checkpoints", s
         print("-" * 90)
 
     final_model_path = checkpoint_dir_path / "final_model.pt"
-    torch.save(
-        {
-            "model_state_dict": model.state_dict(),
-            "config": {
-                "B": B,
-                "R": R,
-                "n_mels": 64,
-                "n_classes": 29,
-            },
-        },
-        final_model_path,
+    final_payload = _build_inference_payload(
+        model=model,
+        B=B,
+        R=R,
+        epoch=num_epochs - 1,
+        best_val_loss=best_val_loss,
     )
+    torch.save(final_payload, final_model_path)
     print(f"Saved final model weights: {final_model_path}")
 
     return model, train_losses, val_losses
