@@ -1,16 +1,7 @@
 #imports
-import torchaudio
-import os
 import torch.nn as nn 
 import torch
-torch.set_num_threads(24)
-
-root = os.getenv("DATASET_PATH", "home/student/GOATS422")
-
-spec_transform = nn.Sequential(
-    torchaudio.transforms.MelSpectrogram(n_fft=400, sample_rate=16000,  hop_length=160, n_mels=64),
-    torchaudio.transforms.AmplitudeToDB(stype="power", top_db=80)
-)
+torch.set_num_threads(12)
 
 class TSCConv(nn.Module):
     def __init__(self, in_channel, out_channel, kernel_size, stride=1):
@@ -33,7 +24,6 @@ class QuartNetBlock(nn.Module):
             TSCConv(in_channel, out_channel, kernel_size),
             *[TSCConv(out_channel, out_channel, kernel_size) for _ in range(R-1)]
         )
-
         #residual 
         self.residual = nn.Sequential(
             nn.Conv1d(in_channel, out_channel, kernel_size=1),

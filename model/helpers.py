@@ -28,10 +28,6 @@ spec_aug_mask = nn.Sequential(
 )
 
 
-def spec_aug(spectrogram):
-    return spec_aug_mask(spectrogram)
-
-
 def encode(transcript):
     transcript = transcript.lower()
     return [char2idx[c] for c in transcript if c in char2idx]
@@ -46,20 +42,21 @@ def decode(indices):
 def collate_fn(batch):
     waveforms, _, transcripts, *_ = zip(*batch)
 
+    # Apply random speed perturbation per utterance for training-time augmentation.
+    perturbed_waveforms = [speed_perturb(w)[0] for w in waveforms]
+
     # Compute mel features per sample (no raw-audio padding first)
-    feats = [spec_transform(w).squeeze(0).transpose(0, 1) for w in waveforms]
+    feats = [spec_transform(w).squeeze(0).transpose(0, 1) for w in perturbed_waveforms]
     # each feat: (time, n_mels)
 
     # Frame lengths for CTC input_lengths
     input_lengths = torch.tensor([f.shape[0] for f in feats], dtype=torch.long)
 
-    # SpecAug on mel features before padding
-    feats = [spec_aug(f.transpose(0, 1)).transpose(0, 1) for f in feats]
-
     #  Pad along time and convert to model shape (batch, n_mels, time)
     tensors = pad_sequence(feats, batch_first=True)          # (B, T, M)
     tensors = tensors.transpose(1, 2).contiguous()           # (B, M, T)
 
+    tensors = spec_aug_mask(tensors)
     # Encode transcripts
     encoded = [torch.tensor(encode(t), dtype=torch.long) for t in transcripts]
     target_lengths = torch.tensor([len(e) for e in encoded], dtype=torch.long)
@@ -83,9 +80,6 @@ def collate_fn_test(batch):
     #  Pad along time and convert to model shape (batch, n_mels, time)
     tensors = pad_sequence(feats, batch_first=True)          # (B, T, M)
     tensors = tensors.transpose(1, 2).contiguous()           # (B, M, T)
-
-    # SpecAug on mel features
-    # tensors = spec_aug(tensors)
 
     # Encode transcripts
     encoded = [torch.tensor(encode(t), dtype=torch.long) for t in transcripts]

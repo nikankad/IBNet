@@ -1,11 +1,12 @@
 import torch.nn as nn
 import torch
 import time
+from pathlib import Path
 from torchaudio.datasets import LIBRISPEECH
 from helpers import collate_fn, collate_fn_test
 from model import QuartzNetBxR
 # from dataset import LocalLibriSpeechDataset
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from torch_optimizer import NovoGrad
 import os
 from dotenv import load_dotenv
@@ -16,14 +17,17 @@ load_dotenv()
 # Access the variables using os.getenv()
 root = str(os.getenv("ROOT"))
 # settings
-torch.set_num_threads(12)
-torch.backends.cudnn.benchmark = True
+# torch.set_num_threads(8)
+# torch.backends.cudnn.benchmark = True
 
 train_ds = LIBRISPEECH(root=root, url="train-clean-100", download=False)
 val_ds = LIBRISPEECH(root=root, url="dev-clean", download=False)
 test_ds = LIBRISPEECH(root=root, url="test-clean", download=False)
 
-
+# Create subsets (20% of each dataset)
+# train_ds = Subset(train_ds, range(len(train_ds) // 5))
+# val_ds = Subset(val_ds, range(len(val_ds) // 5))
+# test_ds = Subset(test_ds, range(len(test_ds) // 5))
 # initialize dataloader
 train_loader = DataLoader(train_ds, batch_size=64, shuffle=True,  collate_fn=collate_fn,
                           num_workers=32, pin_memory=True, persistent_workers=True, prefetch_factor=2)
@@ -42,7 +46,20 @@ def _format_seconds(seconds: float) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 
-def train_model(B=5, R=5, num_epochs=10):
+def _resolve_checkpoint_dir(checkpoint_dir: str) -> Path:
+    checkpoint_path = Path(checkpoint_dir)
+    if checkpoint_path.is_absolute():
+        return checkpoint_path
+    project_root = Path(__file__).resolve().parents[1]
+    return project_root / checkpoint_path
+
+
+def _save_checkpoint(path: Path, payload: dict):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(payload, path)
+
+
+def train_model(B=5, R=5, num_epochs=10, checkpoint_dir="outputs/checkpoints", save_every=10, resume_from=None):
     # Initialize model, optimizer, and loss function
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -55,18 +72,37 @@ def train_model(B=5, R=5, num_epochs=10):
     print(
         f"Starting training for {num_epochs} epochs with QuartzNet B={B}, R={R}")
 
-    model = QuartzNetBxR(n_mels=64, n_classes=29).to(device)
+    model = QuartzNetBxR(n_mels=64, n_classes=29, B=B, R=R).to(device)
     optimizer = NovoGrad(model.parameters(), lr=0.01,
                          betas=(0.95, 0.5), weight_decay=0.001)
     criterion = nn.CTCLoss(blank=28, zero_infinity=True)
+    checkpoint_dir_path = _resolve_checkpoint_dir(checkpoint_dir)
+    checkpoint_dir_path.mkdir(parents=True, exist_ok=True)
+    print(f"Checkpoints will be saved to: {checkpoint_dir_path}")
+
+    start_epoch = 0
+    best_val_loss = float("inf")
 
     train_losses = []
     val_losses = []
     log_interval = max(1, len(train_loader) // 20)
 
+    if resume_from:
+        resume_path = Path(resume_from)
+        if not resume_path.is_absolute():
+            resume_path = checkpoint_dir_path / resume_path
+        checkpoint = torch.load(resume_path, map_location=device)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        start_epoch = checkpoint["epoch"] + 1
+        train_losses = checkpoint.get("train_losses", [])
+        val_losses = checkpoint.get("val_losses", [])
+        best_val_loss = checkpoint.get("best_val_loss", float("inf"))
+        print(f"Resumed from checkpoint: {resume_path} (starting at epoch {start_epoch + 1})")
+
     print("-" * 90)
 
-    for epoch in range(num_epochs):
+    for epoch in range(start_epoch, num_epochs):
         epoch_start_time = time.time()
 
         # Training
@@ -161,7 +197,54 @@ def train_model(B=5, R=5, num_epochs=10):
             f"Val Time: {_format_seconds(val_duration)} | "
             f"ETA to finish: {_format_seconds(eta_epochs_seconds)}"
         )
+
+        checkpoint_payload = {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "train_losses": train_losses,
+            "val_losses": val_losses,
+            "best_val_loss": best_val_loss,
+            "config": {
+                "B": B,
+                "R": R,
+                "n_mels": 64,
+                "n_classes": 29,
+            },
+        }
+
+        last_ckpt_path = checkpoint_dir_path / "last.pt"
+        _save_checkpoint(last_ckpt_path, checkpoint_payload)
+        print(f"Saved last checkpoint: {last_ckpt_path}")
+
+        if avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
+            checkpoint_payload["best_val_loss"] = best_val_loss
+            best_ckpt_path = checkpoint_dir_path / "best.pt"
+            _save_checkpoint(best_ckpt_path, checkpoint_payload)
+            print(f"New best checkpoint: {best_ckpt_path}")
+
+        if save_every > 0 and ((epoch + 1) % save_every == 0):
+            epoch_ckpt_path = checkpoint_dir_path / f"epoch_{epoch + 1:03d}.pt"
+            _save_checkpoint(epoch_ckpt_path, checkpoint_payload)
+            print(f"Saved periodic checkpoint: {epoch_ckpt_path}")
+
         print("-" * 90)
+
+    final_model_path = checkpoint_dir_path / "final_model.pt"
+    torch.save(
+        {
+            "model_state_dict": model.state_dict(),
+            "config": {
+                "B": B,
+                "R": R,
+                "n_mels": 64,
+                "n_classes": 29,
+            },
+        },
+        final_model_path,
+    )
+    print(f"Saved final model weights: {final_model_path}")
 
     return model, train_losses, val_losses
 
