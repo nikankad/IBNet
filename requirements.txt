@@ -1,5 +1,5 @@
 torch
-torchaudio
+torchaudio==2.4.0
 librosa
 sentencepiece
 matplotlib
@@ -7,3 +7,4 @@ ipython
 pandas
 numpy
 torch_optimizer
+dotenv

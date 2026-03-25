@@ -3,7 +3,7 @@ import torch
 import time
 from pathlib import Path
 from torchaudio.datasets import LIBRISPEECH
-from helpers import collate_fn, collate_fn_test, blank, idx2char
+from helpers import collate_fn_speed_perturb, collate_fn_test, blank, idx2char
 from model import QuartzNetBxR
 # from dataset import LocalLibriSpeechDataset
 from torch.utils.data import DataLoader, Subset
@@ -20,7 +20,7 @@ root = str(os.getenv("ROOT"))
 # torch.set_num_threads(8)
 # torch.backends.cudnn.benchmark = True
 
-train_ds = LIBRISPEECH(root=root, url="train-clean-100", download=False)
+train_ds = LIBRISPEECH(root=root, url="train-clean-500", download=False)
 val_ds = LIBRISPEECH(root=root, url="dev-clean", download=False)
 test_ds = LIBRISPEECH(root=root, url="test-clean", download=False)
 
@@ -29,7 +29,7 @@ test_ds = LIBRISPEECH(root=root, url="test-clean", download=False)
 # val_ds = Subset(val_ds, range(len(val_ds) // 5))
 # test_ds = Subset(test_ds, range(len(test_ds) // 5))
 # initialize dataloader
-train_loader = DataLoader(train_ds, batch_size=64, shuffle=True,  collate_fn=collate_fn,
+train_loader = DataLoader(train_ds, batch_size=64, shuffle=True,  collate_fn=collate_fn_speed_perturb,
                           num_workers=32, pin_memory=True, persistent_workers=True, prefetch_factor=2)
 val_loader = DataLoader(val_ds,   batch_size=64, shuffle=False,
                         collate_fn=collate_fn_test, num_workers=32, persistent_workers=True)

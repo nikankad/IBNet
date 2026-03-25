@@ -1,3 +1,7 @@
 first we want to import our dataset (https://www.openslr.org/12), the audio is already preprocessed.
 1) ask about residual 
 2) ask about padding and model wasting compute 
+
+
+
+we fixed the padding issue by using buckets, bucketing will arrange audio files of the similar size

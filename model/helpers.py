@@ -22,7 +22,7 @@ speed_perturb = SpeedPerturbation(
     factors=[0.9, 1.0, 1.1]
 )
 
-spec_aug_mask = nn.Sequential(
+spec_aug_cut = nn.Sequential(
     torchaudio.transforms.FrequencyMasking(freq_mask_param=12),
     torchaudio.transforms.TimeMasking(time_mask_param=20),
 )
@@ -39,7 +39,7 @@ def decode(indices):
 # collate function: pad waveforms and keep transcripts as targets while also returning the orignal lengths of data
 
 
-def collate_fn(batch):
+def collate_fn_speed_perturb(batch):
     waveforms, _, transcripts, *_ = zip(*batch)
 
     # Apply random speed perturbation per utterance for training-time augmentation.
@@ -56,7 +56,6 @@ def collate_fn(batch):
     tensors = pad_sequence(feats, batch_first=True)          # (B, T, M)
     tensors = tensors.transpose(1, 2).contiguous()           # (B, M, T)
 
-    tensors = spec_aug_mask(tensors)
     # Encode transcripts
     encoded = [torch.tensor(encode(t), dtype=torch.long) for t in transcripts]
     target_lengths = torch.tensor([len(e) for e in encoded], dtype=torch.long)
@@ -64,7 +63,7 @@ def collate_fn(batch):
 
     return tensors, targets, input_lengths, target_lengths
 
-# this collate method will not apply the spec augment transformationl.
+
 
 
 def collate_fn_test(batch):
