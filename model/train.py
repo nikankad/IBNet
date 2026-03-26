@@ -7,8 +7,9 @@ import time
 from pathlib import Path
 from torchaudio.datasets import LIBRISPEECH
 from helpers import collate_fn_test, get_dataset_lengths, BucketBatchSampler, log_epoch, collate_fn, batch_word_errors_and_count
-from model import Notarius, QuartzNet
-from torch.utils.data import DataLoader
+from model import Notarius
+from model_old import QuartzNetBxR as QuartzNet
+from torch.utils.data import DataLoader, Subset
 from torch_optimizer import NovoGrad
 from dotenv import load_dotenv
 
@@ -19,19 +20,18 @@ load_dotenv()
 root = str(os.getenv("ROOT"))
 # settings
 
-train_ds = LIBRISPEECH(root=root, url="train-clean-500", download=False)
+train_ds = LIBRISPEECH(root=root, url="train-other-500", download=False)
 val_ds = LIBRISPEECH(root=root, url="dev-clean", download=False)
 test_ds = LIBRISPEECH(root=root, url="test-clean", download=False)
 
-# Create subsets (20% of each dataset)
-# train_ds = Subset(train_ds, range(len(train_ds) // 5))
-# val_ds = Subset(val_ds, range(len(val_ds) // 5))
-# test_ds = Subset(test_ds, range(len(test_ds) // 5))
+# Create subsets (40% of training dataset)
+train_ds = Subset(train_ds, range(2 * len(train_ds) // 5))
 # initialize dataloader
 print("Pre-computing dataset lengths for bucket batching...")
-train_sampler = BucketBatchSampler(get_dataset_lengths(train_ds), batch_size=160, shuffle=True)
-val_sampler   = BucketBatchSampler(get_dataset_lengths(val_ds),   batch_size=160, shuffle=False)
-test_sampler  = BucketBatchSampler(get_dataset_lengths(test_ds),  batch_size=160, shuffle=False)
+_train_lengths = get_dataset_lengths(train_ds.dataset)
+train_sampler = BucketBatchSampler([_train_lengths[i] for i in train_ds.indices], batch_size=256, shuffle=True)
+val_sampler   = BucketBatchSampler(get_dataset_lengths(val_ds),   batch_size=256, shuffle=False)
+test_sampler  = BucketBatchSampler(get_dataset_lengths(test_ds),  batch_size=256, shuffle=False)
 
 train_loader = DataLoader(train_ds, batch_sampler=train_sampler, collate_fn=collate_fn,
                           num_workers=16, pin_memory=True, persistent_workers=True, prefetch_factor=4)
@@ -91,14 +91,13 @@ def train_model(B=5, R=5, num_epochs=10, warmup_epochs=5, lr=0.04, checkpoint_di
     print(
         f"Starting training for {num_epochs} epochs with QuartzNet B={B}, R={R}")
 
-    model = Notarius(n_mels=64, n_classes=29, B=B, R=R).to(device)
+    model = QuartzNet(n_mels=64, n_classes=29, B=B, R=R).to(device)
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Model parameters: {total_params:,}")
     model = torch.compile(model)
     optimizer = NovoGrad(model.parameters(), lr=lr,
                          betas=(0.95, 0.5), weight_decay=0.001)
     criterion = nn.CTCLoss(blank=28, zero_infinity=True)
-    scaler = torch.amp.GradScaler('cuda')  # type: ignore[attr-defined]
 
     # Calculate step-based scheduling
     steps_per_epoch = len(train_loader)
@@ -123,6 +122,7 @@ def train_model(B=5, R=5, num_epochs=10, warmup_epochs=5, lr=0.04, checkpoint_di
 
     start_epoch = 0
     best_val_loss = float("inf")
+    best_val_wer = float("inf")
 
     train_losses = []
     val_losses = []
@@ -147,6 +147,7 @@ def train_model(B=5, R=5, num_epochs=10, warmup_epochs=5, lr=0.04, checkpoint_di
         train_wers = checkpoint.get("train_wers", [])
         val_wers = checkpoint.get("val_wers", [])
         best_val_loss = checkpoint.get("best_val_loss", float("inf"))
+        best_val_wer = checkpoint.get("best_val_wer", float("inf"))
         scheduler_state = checkpoint.get("scheduler_state_dict")
         if scheduler_state is not None:
             scheduler.load_state_dict(scheduler_state)
@@ -177,7 +178,7 @@ def train_model(B=5, R=5, num_epochs=10, warmup_epochs=5, lr=0.04, checkpoint_di
 
             optimizer.zero_grad()
 
-            with torch.autocast(device_type="cuda"):
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 outputs = model(inputs)
                 outputs = outputs.permute(2, 0, 1).log_softmax(dim=2)
 
@@ -185,11 +186,9 @@ def train_model(B=5, R=5, num_epochs=10, warmup_epochs=5, lr=0.04, checkpoint_di
                 loss = criterion(outputs, targets,
                                  adjusted_lengths, target_lengths)
 
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
+            loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            scaler.step(optimizer)
-            scaler.update()
+            optimizer.step()
             scheduler.step()
             total_train_loss += loss.item()
 
@@ -329,6 +328,10 @@ def train_model(B=5, R=5, num_epochs=10, warmup_epochs=5, lr=0.04, checkpoint_di
 
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
+
+        if avg_val_wer < best_val_wer:
+            best_val_wer = avg_val_wer
+            checkpoint_payload["best_val_wer"] = best_val_wer
             checkpoint_payload["best_val_loss"] = best_val_loss
 
             best_ckpt_path = checkpoint_dir_path / "best.pt"
@@ -340,7 +343,7 @@ def train_model(B=5, R=5, num_epochs=10, warmup_epochs=5, lr=0.04, checkpoint_di
                 best_val_loss=best_val_loss,
             )
             _save_checkpoint(best_ckpt_path, best_payload)
-            print(f"New best checkpoint: {best_ckpt_path}")
+            print(f"New best checkpoint (val WER: {avg_val_wer:.2f}%): {best_ckpt_path}")
 
         if save_every > 0 and ((epoch + 1) % save_every == 0):
             epoch_ckpt_path = checkpoint_dir_path / f"epoch_{epoch + 1:03d}.pt"
