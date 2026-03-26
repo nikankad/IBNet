@@ -70,6 +70,27 @@ def collate_fn_speed_perturb(batch):
     return tensors, targets, input_lengths, target_lengths
 
 
+def collate_fn_no_perm(batch):
+    waveforms, _, transcripts, *_ = zip(*batch)
+
+    # Compute mel features per sample (no raw-audio padding first)
+    feats = [spec_transform(w).squeeze(0).transpose(0, 1) for w in waveforms]
+    # each feat: (time, n_mels)
+
+    # Frame lengths for CTC input_lengths
+    input_lengths = torch.tensor([f.shape[0] for f in feats], dtype=torch.long)
+
+    #  Pad along time and convert to model shape (batch, n_mels, time)
+    tensors = pad_sequence(feats, batch_first=True)          # (B, T, M)
+    tensors = tensors.transpose(1, 2).contiguous()           # (B, M, T)
+
+    # Encode transcripts
+    encoded = [torch.tensor(encode(t), dtype=torch.long) for t in transcripts]
+    target_lengths = torch.tensor([len(e) for e in encoded], dtype=torch.long)
+    targets = pad_sequence(encoded, batch_first=True, padding_value=0)
+
+    return tensors, targets, input_lengths, target_lengths
+
 
 
 def get_dataset_lengths(dataset):

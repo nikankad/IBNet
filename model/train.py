@@ -1,15 +1,17 @@
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
 import csv
 import torch.nn as nn
 import torch
 import time
 from pathlib import Path
 from torchaudio.datasets import LIBRISPEECH
-from helpers import collate_fn_speed_perturb, collate_fn_test, blank, idx2char, get_dataset_lengths, BucketBatchSampler, log_epoch
-from model import QuartzNetBxR
+from helpers import collate_fn_speed_perturb, collate_fn_test, blank, idx2char, get_dataset_lengths, BucketBatchSampler, log_epoch, collate_fn_no_perm
+from model import Notarius, QuartzNet
 # from dataset import LocalLibriSpeechDataset
 from torch.utils.data import DataLoader, Subset
 from torch_optimizer import NovoGrad
-import os
 from dotenv import load_dotenv
 
 # Load variables from .env file
@@ -19,7 +21,7 @@ load_dotenv()
 root = str(os.getenv("ROOT"))
 # settings
 
-train_ds = LIBRISPEECH(root=root, url="train-other-500", download=False)
+train_ds = LIBRISPEECH(root=root, url="train-clean-100", download=False)
 val_ds = LIBRISPEECH(root=root, url="dev-clean", download=False)
 test_ds = LIBRISPEECH(root=root, url="test-clean", download=False)
 
@@ -33,7 +35,7 @@ train_sampler = BucketBatchSampler(get_dataset_lengths(train_ds), batch_size=160
 val_sampler   = BucketBatchSampler(get_dataset_lengths(val_ds),   batch_size=160, shuffle=False)
 test_sampler  = BucketBatchSampler(get_dataset_lengths(test_ds),  batch_size=160, shuffle=False)
 
-train_loader = DataLoader(train_ds, batch_sampler=train_sampler, collate_fn=collate_fn_speed_perturb,
+train_loader = DataLoader(train_ds, batch_sampler=train_sampler, collate_fn=collate_fn_no_perm,
                           num_workers=16, pin_memory=True, persistent_workers=True, prefetch_factor=4)
 val_loader = DataLoader(val_ds,   batch_sampler=val_sampler,
                         collate_fn=collate_fn_test, num_workers=16, persistent_workers=True, pin_memory=True)
@@ -149,7 +151,7 @@ def train_model(B=5, R=5, num_epochs=10, warmup_epochs=5, lr=0.04, checkpoint_di
     print(
         f"Starting training for {num_epochs} epochs with QuartzNet B={B}, R={R}")
 
-    model = QuartzNetBxR(n_mels=64, n_classes=29, B=B, R=R).to(device)
+    model = Notarius(n_mels=64, n_classes=29, B=B, R=R).to(device)
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Model parameters: {total_params:,}")
     model = torch.compile(model)
@@ -157,14 +159,23 @@ def train_model(B=5, R=5, num_epochs=10, warmup_epochs=5, lr=0.04, checkpoint_di
                          betas=(0.95, 0.5), weight_decay=0.001)
     criterion = nn.CTCLoss(blank=28, zero_infinity=True)
     scaler = torch.amp.GradScaler('cuda')  # type: ignore[attr-defined]
+
+    # Calculate step-based scheduling
+    steps_per_epoch = len(train_loader)
+    total_steps = num_epochs * steps_per_epoch
+    warmup_steps = warmup_epochs * steps_per_epoch
+    cosine_steps = total_steps - warmup_steps
+
+    print(f"Learning rate schedule | warmup_steps: {warmup_steps} | cosine_steps: {cosine_steps}")
+
     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
-        optimizer, start_factor=0.01, end_factor=1.0, total_iters=warmup_epochs
+        optimizer, start_factor=0.01, end_factor=1.0, total_iters=warmup_steps
     )
     cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=max(1, num_epochs - warmup_epochs), eta_min=1e-3
+        optimizer, T_max=max(1, cosine_steps), eta_min=1e-3
     )
     scheduler = torch.optim.lr_scheduler.SequentialLR(
-        optimizer, schedulers=[warmup_scheduler, cosine_scheduler], milestones=[warmup_epochs]
+        optimizer, schedulers=[warmup_scheduler, cosine_scheduler], milestones=[warmup_steps]
     )
     checkpoint_dir_path = _resolve_checkpoint_dir(checkpoint_dir)
     checkpoint_dir_path.mkdir(parents=True, exist_ok=True)
@@ -235,8 +246,11 @@ def train_model(B=5, R=5, num_epochs=10, warmup_epochs=5, lr=0.04, checkpoint_di
                                  adjusted_lengths, target_lengths)
 
             scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             scaler.step(optimizer)
             scaler.update()
+            scheduler.step()
             total_train_loss += loss.item()
 
             batch_number = batch_idx + 1
@@ -327,7 +341,6 @@ def train_model(B=5, R=5, num_epochs=10, warmup_epochs=5, lr=0.04, checkpoint_di
         epoch_duration = time.time() - epoch_start_time
         eta_epochs_seconds = (num_epochs - (epoch + 1)) * epoch_duration
 
-        scheduler.step()
         current_lr = scheduler.get_last_lr()[0]
 
         print(
@@ -417,8 +430,8 @@ if __name__ == "__main__":
     parser.add_argument("--epochs",      type=int,   default=50)
     parser.add_argument("--B",           type=int,   default=5)
     parser.add_argument("--R",           type=int,   default=5)
-    parser.add_argument("--lr",          type=float, default=0.04)
-    parser.add_argument("--warmup",      type=int,   default=5)
+    parser.add_argument("--lr",          type=float, default=0.05)
+    parser.add_argument("--warmup",      type=int,   default=2)
     parser.add_argument("--checkpoint-dir", default="outputs/checkpoints")
     parser.add_argument("--log-csv",     default="outputs/training_log.csv")
     args = parser.parse_args()

@@ -1,8 +1,4 @@
-__all__ = ["QuartzNetBxR"]
+__all__ = ["Notarius", "QuartzNet"]
 
-
-def __getattr__(name):
-	if name == "QuartzNetBxR":
-		from .model import QuartzNetBxR
-		return QuartzNetBxR
-	raise AttributeError(f"module 'model' has no attribute {name!r}")
+from .model import Notarius
+from .model_old import QuartzNetBxR as QuartzNet

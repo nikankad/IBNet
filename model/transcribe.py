@@ -6,6 +6,7 @@ import torchaudio
 
 from helpers import blank, idx2char, spec_transform
 from model import QuartzNetBxR
+from model_old import QuartzNetBxR as OldQuartzNetBxR
 
 
 def _ctc_greedy_decode(token_ids):
@@ -23,17 +24,27 @@ def _load_model(checkpoint_path: Path, device: torch.device):
         checkpoint_path, map_location=device, weights_only=True)
 
     config = checkpoint.get("config", {})
-    model = QuartzNetBxR(
+
+    if "model_state_dict" in checkpoint:
+        state_dict = checkpoint["model_state_dict"]
+    else:
+        state_dict = checkpoint
+
+    # Strip _orig_mod. prefix from torch.compile() checkpoints
+    state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+
+    # Detect old vs new architecture by checking key names
+    is_old = any("net.3.net." in k for k in state_dict.keys())
+    ModelClass = OldQuartzNetBxR if is_old else QuartzNetBxR
+
+    model = ModelClass(
         n_mels=config.get("n_mels", 64),
         n_classes=config.get("n_classes", 29),
         B=config.get("B", 5),
         R=config.get("R", 5),
     ).to(device)
 
-    if "model_state_dict" in checkpoint:
-        model.load_state_dict(checkpoint["model_state_dict"])
-    else:
-        model.load_state_dict(checkpoint)
+    model.load_state_dict(state_dict)
 
     model.eval()
     return model
@@ -71,7 +82,7 @@ def main():
                         help="Path to input wav file")
     parser.add_argument(
         "--checkpoint",
-        default="/home/xz/GOATS422/Notarius/outputs/checkpoints/best.pt",
+        default="/home/xz/GOATS422/Notarius/outputs/checkpoints_speed_perturb2/epoch_050.pt",
         help="Path to model checkpoint (default: outputs/checkpoints/best.pt)",
     )
     parser.add_argument(

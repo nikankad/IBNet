@@ -6,3 +6,25 @@ first we want to import our dataset (https://www.openslr.org/12), the audio is a
 
 we fixed the padding issue by using buckets, bucketing will arrange audio files of the similar size.
 Also added cosine annealing and lr warmup with mixed point percision
+
+new data augmentation: 
+use expand to make features more rich
+
+
+add residual to every block
+
+experimments: 
+1) greedy wer original 5x5, test wer, clean wer, other wer 
+2) report ours 
+3) report with new curriculam, with new augmentatioon and LM 
+try different hyperparams (max size to hide the image, % to start on), how we define what the model is spending "attention" on for adverserial to cover, when we introduce adverserial
+tabel for hyperparms and performance 
+
+maybe combine all them 
+
+75 epochs
+
+(ALL OF THESE ARE WITH NEW MODEL DESIGN)
+1) without curriculam and lm (greedy) no speed perm
+2) with curriculam with lm for wer (no speed perm)
+3) How hyperparameters effect performance (for cutout, adverserial ratio)

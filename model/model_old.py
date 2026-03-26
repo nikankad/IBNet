@@ -2,12 +2,12 @@
 import torch.nn as nn 
 import torch
 class TSCConv(nn.Module):
-    def __init__(self, in_channel, out_channel, kernel_size, stride=1, relu=True, pw_kernel=3):
+    def __init__(self, in_channel, out_channel, kernel_size, stride=1, relu=True):
         super().__init__()
         padding = (kernel_size - 1) // 2
         layers = [
             nn.Conv1d(in_channel, in_channel, kernel_size, stride, padding, groups=in_channel),
-            nn.Conv1d(in_channel, out_channel, kernel_size=pw_kernel, padding=pw_kernel//2),
+            nn.Conv1d(in_channel, out_channel, kernel_size=1),
             nn.BatchNorm1d(out_channel),
         ]
         if relu:
@@ -18,29 +18,23 @@ class TSCConv(nn.Module):
         return self.net(x)
     
 class QuartNetBlock(nn.Module):
-    def __init__(self, in_channel, out_channel, kernel_size, R=5, pw_kernel=3):
+    def __init__(self, in_channel, out_channel, kernel_size, R=5):
         super().__init__()
-
-        self.layer1 = TSCConv(in_channel, out_channel, kernel_size, pw_kernel=pw_kernel)
-        self.layers = nn.ModuleList([
-            TSCConv(out_channel, out_channel, kernel_size, pw_kernel=pw_kernel) for _ in range(R-2)
-        ])
-        self.layer_final = TSCConv(out_channel, out_channel, kernel_size, relu=False, pw_kernel=pw_kernel)
-
-        #residual
+    
+        self.net = nn.Sequential(
+            TSCConv(in_channel, out_channel, kernel_size),
+            *[TSCConv(out_channel, out_channel, kernel_size) for _ in range(R-2)],
+            TSCConv(out_channel, out_channel, kernel_size, relu=False),
+        )
+        #residual 
         self.residual = nn.Sequential(
             nn.Conv1d(in_channel, out_channel, kernel_size=1),
             nn.BatchNorm1d(out_channel)
         )
     def forward(self, x):
-        out = self.layer1(x)
-        for layer in self.layers:
-            out = out + layer(out)
-        out = out + self.layer_final(out)
-        out = out + self.residual(x)
-        return torch.relu(out)
+        return torch.relu(self.net(x) + self.residual(x))
 
-class Notarius(nn.Module):
+class QuartzNetBxR(nn.Module):
     def __init__(self, n_mels=64, n_classes=29, B=5, R=5):
         super().__init__()
         self.net = nn.Sequential(
