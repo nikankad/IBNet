@@ -54,9 +54,7 @@ class QuartzNetBxR(nn.Module):
             #B5
             QuartNetBlock(512, 512, kernel_size=75, R=5),
             #C2
-            nn.Conv1d(512, 512, kernel_size=87, padding=43),
-            nn.BatchNorm1d(512),
-            nn.ReLU(),
+            TSCConv(512, 512, kernel_size=87),
             #C3
             nn.Conv1d(512, 1024, kernel_size=1),
             nn.BatchNorm1d(1024),

@@ -18,8 +18,6 @@ load_dotenv()
 # Access the variables using os.getenv()
 root = str(os.getenv("ROOT"))
 # settings
-# torch.set_num_threads(8)
-torch.backends.cudnn.benchmark = True
 
 train_ds = LIBRISPEECH(root=root, url="train-other-500", download=False)
 val_ds = LIBRISPEECH(root=root, url="dev-clean", download=False)
@@ -31,9 +29,9 @@ test_ds = LIBRISPEECH(root=root, url="test-clean", download=False)
 # test_ds = Subset(test_ds, range(len(test_ds) // 5))
 # initialize dataloader
 print("Pre-computing dataset lengths for bucket batching...")
-train_sampler = BucketBatchSampler(get_dataset_lengths(train_ds), batch_size=128, shuffle=True)
-val_sampler   = BucketBatchSampler(get_dataset_lengths(val_ds),   batch_size=128, shuffle=False)
-test_sampler  = BucketBatchSampler(get_dataset_lengths(test_ds),  batch_size=128, shuffle=False)
+train_sampler = BucketBatchSampler(get_dataset_lengths(train_ds), batch_size=160, shuffle=True)
+val_sampler   = BucketBatchSampler(get_dataset_lengths(val_ds),   batch_size=160, shuffle=False)
+test_sampler  = BucketBatchSampler(get_dataset_lengths(test_ds),  batch_size=160, shuffle=False)
 
 train_loader = DataLoader(train_ds, batch_sampler=train_sampler, collate_fn=collate_fn_speed_perturb,
                           num_workers=16, pin_memory=True, persistent_workers=True, prefetch_factor=2)
@@ -138,7 +136,7 @@ def _build_inference_payload(model, B: int, R: int, epoch: int, best_val_loss: f
     }
 
 
-def train_model(B=5, R=5, num_epochs=10, warmup_epochs=5, checkpoint_dir="outputs/checkpoints", save_every=10, resume_from=None, log_csv="outputs/training_log.csv"):
+def train_model(B=5, R=5, num_epochs=10, warmup_epochs=5, lr=0.04, checkpoint_dir="outputs/checkpoints", save_every=10, resume_from=None, log_csv="outputs/training_log.csv"):
     # Initialize model, optimizer, and loss function
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -152,7 +150,9 @@ def train_model(B=5, R=5, num_epochs=10, warmup_epochs=5, checkpoint_dir="output
         f"Starting training for {num_epochs} epochs with QuartzNet B={B}, R={R}")
 
     model = QuartzNetBxR(n_mels=64, n_classes=29, B=B, R=R).to(device)
-    optimizer = NovoGrad(model.parameters(), lr=0.04,
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"Model parameters: {total_params:,}")
+    optimizer = NovoGrad(model.parameters(), lr=lr,
                          betas=(0.95, 0.5), weight_decay=0.001)
     criterion = nn.CTCLoss(blank=28, zero_infinity=True)
     scaler = torch.amp.GradScaler('cuda')  # type: ignore[attr-defined]
@@ -227,12 +227,6 @@ def train_model(B=5, R=5, num_epochs=10, warmup_epochs=5, checkpoint_dir="output
 
             with torch.autocast(device_type="cuda"):
                 outputs = model(inputs)
-                train_word_errors, train_ref_words = _batch_word_errors_and_count(
-                    outputs, targets, target_lengths
-                )
-                total_train_word_errors += train_word_errors
-                total_train_ref_words += train_ref_words
-
                 outputs = outputs.permute(2, 0, 1).log_softmax(dim=2)
 
                 adjusted_lengths = ((input_lengths - 1) // 2) + 1
@@ -246,6 +240,13 @@ def train_model(B=5, R=5, num_epochs=10, warmup_epochs=5, checkpoint_dir="output
 
             batch_number = batch_idx + 1
             if batch_number % log_interval == 0 or batch_number == len(train_loader):
+                wer_logits = outputs.detach().permute(1, 2, 0)  # (B, C, T)
+                train_word_errors, train_ref_words = _batch_word_errors_and_count(
+                    wer_logits, targets, target_lengths
+                )
+                total_train_word_errors += train_word_errors
+                total_train_ref_words += train_ref_words
+
                 running_avg_loss = total_train_loss / (batch_idx + 1)
                 elapsed = time.time() - train_start_time
                 avg_batch_time = elapsed / batch_number
@@ -346,6 +347,7 @@ def train_model(B=5, R=5, num_epochs=10, warmup_epochs=5, checkpoint_dir="output
             prev_val_loss=val_losses[-2]     if len(val_losses)   > 1 else None,
             prev_train_wer=train_wers[-2]    if len(train_wers)   > 1 else None,
             prev_val_wer=val_wers[-2]        if len(val_wers)     > 1 else None,
+            total_params=total_params,
         )
 
         checkpoint_payload = {
@@ -407,4 +409,16 @@ def train_model(B=5, R=5, num_epochs=10, warmup_epochs=5, checkpoint_dir="output
 
 
 if __name__ == "__main__":
-    train_model(B=5, R=5, num_epochs=50)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--resume",      default=None,                        help="Checkpoint to resume from")
+    parser.add_argument("--epochs",      type=int,   default=50)
+    parser.add_argument("--B",           type=int,   default=5)
+    parser.add_argument("--R",           type=int,   default=5)
+    parser.add_argument("--lr",          type=float, default=0.04)
+    parser.add_argument("--warmup",      type=int,   default=5)
+    parser.add_argument("--checkpoint-dir", default="outputs/checkpoints")
+    parser.add_argument("--log-csv",     default="outputs/training_log.csv")
+    args = parser.parse_args()
+    train_model(B=args.B, R=args.R, num_epochs=args.epochs, warmup_epochs=args.warmup, lr=args.lr,
+                checkpoint_dir=args.checkpoint_dir, resume_from=args.resume, log_csv=args.log_csv)

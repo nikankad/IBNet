@@ -47,26 +47,16 @@ def decode(indices):
 def collate_fn_speed_perturb(batch):
     waveforms, _, transcripts, *_ = zip(*batch)
 
-    # Apply random speed perturbation per utterance for training-time augmentation.
-    perturbed_waveforms = [speed_perturb(w)[0] for w in waveforms]
+    # Apply random speed perturbation on CPU (resampling is not GPU-friendly)
+    perturbed = [speed_perturb(w)[0] for w in waveforms]
 
-    # Compute mel features per sample (no raw-audio padding first)
-    feats = [spec_transform(w).squeeze(0).transpose(0, 1) for w in perturbed_waveforms]
-    # each feat: (time, n_mels)
-
-    # Frame lengths for CTC input_lengths
-    input_lengths = torch.tensor([f.shape[0] for f in feats], dtype=torch.long)
-
-    #  Pad along time and convert to model shape (batch, n_mels, time)
-    tensors = pad_sequence(feats, batch_first=True)          # (B, T, M)
-    tensors = tensors.transpose(1, 2).contiguous()           # (B, M, T)
-
-    # Encode transcripts
+    # Encode transcripts (cheap, keep on CPU)
     encoded = [torch.tensor(encode(t), dtype=torch.long) for t in transcripts]
     target_lengths = torch.tensor([len(e) for e in encoded], dtype=torch.long)
     targets = pad_sequence(encoded, batch_first=True, padding_value=0)
 
-    return tensors, targets, input_lengths, target_lengths
+    # Return raw waveforms as a list — mel spectrogram computed on GPU in training loop
+    return perturbed, targets, target_lengths
 
 
 
@@ -93,16 +83,32 @@ def get_dataset_lengths(dataset):
 
 
 class BucketBatchSampler(Sampler):
-    """Batch indices so that each batch contains similarly-lengthed sequences."""
-    def __init__(self, lengths, batch_size, shuffle=True):
+    """Batch indices so that each batch contains similarly-lengthed sequences.
+
+    Samples are first sorted by length and divided into `num_buckets` equal
+    buckets.  Batches are built within each bucket (not across boundaries), so
+    within-batch length variance is governed by `num_buckets` rather than
+    `batch_size`.  This keeps padding overhead constant regardless of batch size.
+    """
+    def __init__(self, lengths, batch_size, shuffle=True, num_buckets=200):
         self.lengths = lengths
         self.batch_size = batch_size
         self.shuffle = shuffle
+        self.num_buckets = num_buckets
 
     def __iter__(self):
         sorted_indices = sorted(range(len(self.lengths)), key=lambda i: self.lengths[i])
-        batches = [sorted_indices[i:i + self.batch_size]
-                   for i in range(0, len(sorted_indices), self.batch_size)]
+        bucket_size = max(self.batch_size, len(sorted_indices) // self.num_buckets)
+        buckets = [sorted_indices[i:i + bucket_size]
+                   for i in range(0, len(sorted_indices), bucket_size)]
+
+        batches = []
+        for bucket in buckets:
+            if self.shuffle:
+                random.shuffle(bucket)
+            for i in range(0, len(bucket), self.batch_size):
+                batches.append(bucket[i:i + self.batch_size])
+
         if self.shuffle:
             random.shuffle(batches)
         for batch in batches:
@@ -113,7 +119,8 @@ class BucketBatchSampler(Sampler):
 
 
 def log_epoch(csv_path, epoch, train_loss, val_loss, train_wer, val_wer,
-              prev_train_loss=None, prev_val_loss=None, prev_train_wer=None, prev_val_wer=None):
+              prev_train_loss=None, prev_val_loss=None, prev_train_wer=None, prev_val_wer=None,
+              total_params=None):
     def pct(current, previous):
         if previous is None:
             return ""
@@ -126,12 +133,12 @@ def log_epoch(csv_path, epoch, train_loss, val_loss, train_wer, val_wer,
         writer = csv.writer(f)
         if write_header:
             writer.writerow([
-                "epoch",
+                "epoch", "total_params",
                 "train_loss", "val_loss", "train_loss_delta_%", "val_loss_delta_%",
                 "train_wer",  "val_wer",  "train_wer_delta_%",  "val_wer_delta_%",
             ])
         writer.writerow([
-            epoch,
+            epoch, total_params if total_params is not None else "",
             f"{train_loss:.6f}", f"{val_loss:.6f}",
             pct(train_loss, prev_train_loss), pct(val_loss, prev_val_loss),
             f"{train_wer:.4f}",  f"{val_wer:.4f}",

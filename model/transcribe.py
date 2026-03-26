@@ -71,7 +71,7 @@ def main():
                         help="Path to input wav file")
     parser.add_argument(
         "--checkpoint",
-        default="/home/xz/GOATS422/Notarius/outputs/checkpoints/epoch_080.pt",
+        default="/home/xz/GOATS422/Notarius/outputs/checkpoints/best.pt",
         help="Path to model checkpoint (default: outputs/checkpoints/best.pt)",
     )
     parser.add_argument(
