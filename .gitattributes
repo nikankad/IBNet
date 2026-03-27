@@ -1,2 +1,4 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+model/lm/6gram.arpa filter=lfs diff=lfs merge=lfs -text
+model/lm/6gram.bin filter=lfs diff=lfs merge=lfs -text
