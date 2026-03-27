@@ -152,8 +152,7 @@ class BucketBatchSampler(Sampler):
 
 
 def log_epoch(csv_path, epoch, train_loss, val_loss, train_wer, val_wer,
-              prev_train_loss=None, prev_val_loss=None, prev_train_wer=None, prev_val_wer=None,
-              total_params=None):
+              prev_train_loss=None, prev_val_loss=None, prev_train_wer=None, prev_val_wer=None):
     def pct(current, previous):
         if previous is None:
             return ""
@@ -166,12 +165,12 @@ def log_epoch(csv_path, epoch, train_loss, val_loss, train_wer, val_wer,
         writer = csv.writer(f)
         if write_header:
             writer.writerow([
-                "epoch", "total_params",
+                "epoch",
                 "train_loss", "val_loss", "train_loss_delta_%", "val_loss_delta_%",
                 "train_wer",  "val_wer",  "train_wer_delta_%",  "val_wer_delta_%",
             ])
         writer.writerow([
-            epoch, total_params if total_params is not None else "",
+            epoch,
             f"{train_loss:.6f}", f"{val_loss:.6f}",
             pct(train_loss, prev_train_loss), pct(val_loss, prev_val_loss),
             f"{train_wer:.4f}",  f"{val_wer:.4f}",

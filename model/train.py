@@ -1,6 +1,7 @@
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
+import random
 import torch.nn as nn
 import torch
 import time
@@ -24,14 +25,17 @@ train_ds = LIBRISPEECH(root=root, url="train-other-500", download=False)
 val_ds = LIBRISPEECH(root=root, url="dev-clean", download=False)
 test_ds = LIBRISPEECH(root=root, url="test-clean", download=False)
 
-# Create subsets (40% of training dataset)
-train_ds = Subset(train_ds, range(2 * len(train_ds) // 5))
+# Create subsets (40% of training dataset, seeded for reproducibility)
+_rng = random.Random(42)
+_indices = list(range(len(train_ds)))
+_rng.shuffle(_indices)
+train_ds = Subset(train_ds, _indices[:2 * len(train_ds) // 5])
 # initialize dataloader
 print("Pre-computing dataset lengths for bucket batching...")
 _train_lengths = get_dataset_lengths(train_ds.dataset)
-train_sampler = BucketBatchSampler([_train_lengths[i] for i in train_ds.indices], batch_size=128, shuffle=True)
-val_sampler   = BucketBatchSampler(get_dataset_lengths(val_ds),   batch_size=128 , shuffle=False)
-test_sampler  = BucketBatchSampler(get_dataset_lengths(test_ds),  batch_size=128 , shuffle=False)
+train_sampler = BucketBatchSampler([_train_lengths[i] for i in train_ds.indices], batch_size=180, shuffle=True)
+val_sampler   = BucketBatchSampler(get_dataset_lengths(val_ds),   batch_size=180 , shuffle=False)
+test_sampler  = BucketBatchSampler(get_dataset_lengths(test_ds),  batch_size=180 , shuffle=False)
 
 train_loader = DataLoader(train_ds, batch_sampler=train_sampler, collate_fn=collate_fn,
                           num_workers=16, pin_memory=True, persistent_workers=True, prefetch_factor=4)
@@ -301,7 +305,6 @@ def train_model(B=5, R=5, num_epochs=10, warmup_epochs=5, lr=0.04, checkpoint_di
             prev_val_loss=val_losses[-2]     if len(val_losses)   > 1 else None,
             prev_train_wer=train_wers[-2]    if len(train_wers)   > 1 else None,
             prev_val_wer=val_wers[-2]        if len(val_wers)     > 1 else None,
-            total_params=total_params,
         )
 
         checkpoint_payload = {
@@ -378,5 +381,31 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint-dir", default="outputs/checkpoints")
     parser.add_argument("--log-csv",     default="outputs/training_log.csv")
     args = parser.parse_args()
+
+    # Early path validation — fail fast before any training begins
+    errors = []
+
+    if args.resume is not None:
+        resume_path = Path(args.resume)
+        if not resume_path.is_absolute():
+            resume_path = _resolve_checkpoint_dir(args.checkpoint_dir) / resume_path
+        if not resume_path.exists():
+            errors.append(f"--resume: file not found: {resume_path}")
+
+    log_csv_path = Path(args.log_csv)
+    if log_csv_path.is_dir():
+        errors.append(f"--log-csv: '{log_csv_path}' is a directory, not a file (did you forget to add .csv?)")
+    elif log_csv_path.parent != Path(".") and not log_csv_path.parent.exists():
+        errors.append(f"--log-csv: parent directory does not exist: {log_csv_path.parent}")
+
+    ckpt_dir_path = _resolve_checkpoint_dir(args.checkpoint_dir)
+    if ckpt_dir_path.exists() and not ckpt_dir_path.is_dir():
+        errors.append(f"--checkpoint-dir: '{ckpt_dir_path}' exists but is not a directory")
+
+    if errors:
+        for e in errors:
+            print(f"ERROR: {e}")
+        raise SystemExit(1)
+
     train_model(B=args.B, R=args.R, num_epochs=args.epochs, warmup_epochs=args.warmup, lr=args.lr,
                 checkpoint_dir=args.checkpoint_dir, resume_from=args.resume, log_csv=args.log_csv)
