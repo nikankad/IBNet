@@ -12,20 +12,23 @@
 cd /home/nikan.kadkhodazadeh/Notarius || exit 1
 
 source ~/.bashrc
-source NotariusVenv/bin/activate
+
+# activate the environment that has torch installed
+# example:
+# conda activate notarius
+# or:
+source Notariusvenv/bin/activate
 
 python --version
 which python
 python -c "import torch; print(torch.__version__)"
 nvidia-smi
 
-TORCHELASTIC_ERROR_FILE=/tmp/torch_elastic_error.json python -m torch.distributed.run --standalone --nproc_per_node=2 model/train_notarius.py \
+torchrun --standalone --nproc_per_node=2 model/train_qn.py \
   --epochs 50 \
-  --R 3 \
-  --C 192 \
-  --expand 2 \
+  --R 5 \
   --lr 0.005 \
   --warmup 2 \
   --batch-size 180 \
-  --output-dir outputs/notarius \
-  --log-aug-speccutout
+  --output-dir outputs/quartznet \
+  --log-aug-speed
