@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=128G
 #SBATCH --time=24:00:00
-#SBATCH --gres=gpu:2,gpumem:12G
+#SBATCH --gres=gpu:a100:2,gpumem:40G
 #SBATCH --output=logs/slurm-%j.out
 
 cd /home/nikan.kadkhodazadeh/Notarius || exit 1
