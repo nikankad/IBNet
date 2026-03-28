@@ -20,7 +20,7 @@ nvidia-smi
 
 # === Evaluate Notarius (cutout) with LM ===
 python model/eval_lm.py \
-  --checkpoint outputs/notarius/REPLACE_WITH_YOUR_NOTARIUS_RUN/best.pt \
+  --checkpoint outputs/notarius/notarius-cutout-242727/best.pt \
   --arpa model/lm/6gram.arpa \
   --beam-width 100 \
   --lm-alpha 0.5 \
