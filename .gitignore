@@ -188,3 +188,4 @@ outputs/**/*.pt
 .DS_Store
 model/lm/6gram.arpa
 model/lm/6gram.bin
+.DS_Store

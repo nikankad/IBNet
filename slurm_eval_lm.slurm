@@ -27,9 +27,9 @@ python model/eval_lm.py \
   --lm-beta 1.5
 
 # === Evaluate QuartzNet (cutout) with LM ===
-# python model/eval_lm.py \
-#   --checkpoint outputs/quartznet/REPLACE_WITH_YOUR_QN_RUN/best.pt \
-#   --arpa model/lm/6gram.arpa \
-#   --beam-width 100 \
-#   --lm-alpha 0.5 \
-#   --lm-beta 1.5
+python model/eval_lm.py \
+  --checkpoint outputs/quartznet/quartznet-cutout-242732/best.pt \
+  --arpa model/lm/6gram.arpa \
+  --beam-width 100 \
+  --lm-alpha 0.5 \
+  --lm-beta 1.5
