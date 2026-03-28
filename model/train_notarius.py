@@ -562,7 +562,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=0.005)
     parser.add_argument("--warmup", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=180)
-    parser.add_argument("--num-workers", type=int, default=16)
+    parser.add_argument("--num-workers", type=int, default=8)
     parser.add_argument("--save-every", type=int, default=10)
     parser.add_argument("--output-dir", default="outputs/notarius", help="Base output dir; run saved to <output-dir>/<run-id>/")
     parser.add_argument("--no-compile", action="store_true")
