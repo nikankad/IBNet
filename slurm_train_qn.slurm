@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=128G
 #SBATCH --time=24:00:00
-#SBATCH --gres=gpu:a100:2,gpumem:40G
+#SBATCH --gres=gpu:a100:4,gpumem:40G
 #SBATCH --output=logs/slurm-%j.out
 
 cd "$HOME/Notarius" || exit 1
@@ -24,9 +24,9 @@ which python
 python -c "import torch; print(torch.__version__)"
 nvidia-smi
 
-torchrun --standalone --nproc_per_node=2 model/train_qn.py \
+torchrun --standalone --nproc_per_node=4 model/train_qn.py \
   --epochs 50 \
-  --B 5 \
+  --B 10 \
   --R 5 \
   --lr 0.005 \
   --warmup 2 \
