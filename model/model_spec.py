@@ -18,6 +18,21 @@ def _layer_summary(model: nn.Module) -> list[str]:
     return lines
 
 
+def _decoder_lines(decoder: dict | None) -> list[str]:
+    if decoder is None:
+        return [
+            f"  Type               : Greedy (argmax)",
+            f"  Language model     : None",
+        ]
+    return [
+        f"  Type               : {decoder.get('type', 'Greedy')}",
+        f"  Language model     : {decoder.get('lm', 'None')}",
+        f"  LM alpha           : {decoder.get('alpha', 'N/A')}",
+        f"  LM beta            : {decoder.get('beta', 'N/A')}",
+        f"  Beam width         : {decoder.get('beam_width', 'N/A')}",
+    ]
+
+
 def _augmentation_lines(augmentation: dict | None) -> list[str]:
     def _flag(val: bool) -> str:
         return "ON " if val else "OFF"
@@ -50,6 +65,7 @@ def write_training_config(
     C: int | None = None,
     expand: int | None = None,
     augmentation: dict | None = None,
+    decoder: dict | None = None,
 ):
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     out_path = checkpoint_dir / "training_config.txt"
@@ -102,6 +118,9 @@ def write_training_config(
         "",
         "[ Augmentation ]",
         *_augmentation_lines(augmentation),
+        "",
+        "[ Decoder ]",
+        *_decoder_lines(decoder),
         "",
         "[ Dataset ]",
         f"  Train size    : {train_size:,}",

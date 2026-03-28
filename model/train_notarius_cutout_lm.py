@@ -278,6 +278,13 @@ def train_model(
                 train_size=len(train_ds), val_size=len(val_ds), test_size=len(test_ds),
                 device=f"{device} | world_size={world_size} | per_device_batch_size={per_device_batch_size}",
                 augmentation=augmentation,
+                decoder={
+                    "type": "Beam search (pyctcdecode)",
+                    "lm": arpa_path,
+                    "alpha": lm_alpha,
+                    "beta": lm_beta,
+                    "beam_width": beam_width,
+                },
             )
 
         start_epoch = 0
