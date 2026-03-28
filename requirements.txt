@@ -8,3 +8,5 @@ pandas
 numpy
 torch_optimizer
 dotenv
+pyctcdecode 
+pypi-kenlm
