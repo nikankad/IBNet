@@ -28,4 +28,5 @@ torchrun --standalone --nproc_per_node=2 model/train_notarius.py \
   --warmup 2 \
   --batch-size 180 \
   --output-dir outputs/notarius \
-  --log-aug-speed
+  --log-aug-speed \
+  --num-workers 8
