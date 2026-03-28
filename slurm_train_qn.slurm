@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=notarius-train
+#SBATCH --job-name=qn-train
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
