@@ -12,7 +12,7 @@
 cd /home/nikan.kadkhodazadeh/Notarius || exit 1
 
 source ~/.bashrc
-source NotariusVenv/bin/activate
+source Notariusvenv/bin/activate
 
 python --version
 which python
