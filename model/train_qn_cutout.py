@@ -17,7 +17,6 @@ from helpers import (
     BucketBatchSampler,
     DistributedBucketBatchSampler,
     batch_word_errors_and_count,
-    collate_fn,
     collate_fn_test,
     get_dataset_lengths,
     log_epoch,
