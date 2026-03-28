@@ -21,12 +21,44 @@ from helpers import (
     get_dataset_lengths,
     log_epoch,
     collate_fn_cutout,
+    chars,
+    idx2char,
+    word_edit_distance,
 )
 from qnmodel import QuartzNetBxR
 from model_spec import write_training_config
 
 load_dotenv()
 root = os.getenv("ROOT")
+
+DEFAULT_ARPA = "lm/6gram.arpa"
+
+
+def _build_lm_decoder(arpa_path, alpha=0.5, beta=1.5, beam_width=100):
+    from pyctcdecode import build_ctcdecoder
+    vocab = list(chars)  # indices 0-27
+    vocab.append("")     # index 28: CTC blank
+    return build_ctcdecoder(vocab, arpa_path, unigrams=None,
+                            alpha=alpha, beta=beta, unk_score_offset=-10.0)
+
+
+def batch_word_errors_and_count_lm(logits, targets, target_lengths, lm_decoder, beam_width=100):
+    """LM beam search WER. logits: (B, n_classes, T) log-softmax."""
+    log_probs_batch = logits.permute(0, 2, 1).detach().cpu().numpy()
+    targets_cpu = targets.detach().cpu()
+    target_lengths_cpu = target_lengths.detach().cpu()
+
+    total_word_errors = 0
+    total_ref_words = 0
+    for i in range(log_probs_batch.shape[0]):
+        hyp_text = lm_decoder.decode(log_probs_batch[i], beam_width=beam_width)
+        target_len = int(target_lengths_cpu[i].item())
+        ref_text = "".join(idx2char[t] for t in targets_cpu[i, :target_len].tolist())
+        ref_words = ref_text.split()
+        hyp_words = hyp_text.split()
+        total_word_errors += word_edit_distance(ref_words, hyp_words)
+        total_ref_words += len(ref_words)
+    return total_word_errors, total_ref_words
 
 
 def _generate_run_id(aug_label: str = "") -> str:
@@ -217,6 +249,10 @@ def train_model(
     compile_model=True,
     run_id=None,
     augmentation=None,
+    arpa_path=DEFAULT_ARPA,
+    beam_width=100,
+    lm_alpha=0.5,
+    lm_beta=1.5,
 ):
     rank, local_rank, world_size, device = _setup_distributed()
     is_main = _is_main_process(rank)
@@ -226,6 +262,12 @@ def train_model(
 
     run_dir = _resolve_checkpoint_dir(output_base) / run_id
     log_csv = str(run_dir / "training_log.csv")
+
+    lm_decoder = None
+    if is_main:
+        print(f"Loading 6-gram LM from: {arpa_path}")
+        lm_decoder = _build_lm_decoder(arpa_path, alpha=lm_alpha, beta=lm_beta, beam_width=beam_width)
+        print("LM decoder ready.")
 
     try:
         train_ds, val_ds, test_ds = _build_datasets()
@@ -241,7 +283,7 @@ def train_model(
             print(f"Dataloader batches | train: {len(train_loader)} | val: {len(val_loader)} | test: {len(test_loader)}")
             print(f"Batch sizes | global target: {batch_size} | per GPU: {per_device_batch_size}")
             print(f"Starting training for {num_epochs} epochs with QuartzNet R={R}")
-            print(f"Augmentation: SpecCutout (train), LM-ready checkpoint")
+            print(f"Augmentation: SpecCutout | Val decoder: 6-gram LM beam search (beam={beam_width})")
 
         base_model = QuartzNetBxR(n_mels=64, n_classes=29, R=R).to(device)
         total_params = sum(p.numel() for p in base_model.parameters())
@@ -394,7 +436,7 @@ def train_model(
                         f"Epoch {epoch+1}/{num_epochs} | "
                         f"Train {batch_number:>4}/{len(train_loader)} ({progress:5.1f}%) | "
                         f"Loss: {loss.item():.4f} | Avg: {running_avg_loss:.4f} | "
-                        f"WER: {running_train_wer:.2f}% | "
+                        f"WER (greedy): {running_train_wer:.2f}% | "
                         f"ETA: {_format_seconds(eta_seconds)}"
                     )
 
@@ -410,7 +452,7 @@ def train_model(
                 train_wers.append(avg_train_wer)
                 print(
                     f"Epoch {epoch+1}/{num_epochs} | Train done | "
-                    f"Avg Loss: {avg_train_loss:.4f} | WER: {avg_train_wer:.2f}% | "
+                    f"Avg Loss: {avg_train_loss:.4f} | WER (greedy): {avg_train_wer:.2f}% | "
                     f"Time: {_format_seconds(train_duration)}"
                 )
 
@@ -421,7 +463,7 @@ def train_model(
                 total_val_loss = 0.0
                 total_val_word_errors = 0
                 total_val_ref_words = 0
-                print(f"Epoch {epoch+1}/{num_epochs} | Validation")
+                print(f"Epoch {epoch+1}/{num_epochs} | Validation (6-gram LM beam search, beam={beam_width})")
                 val_start_time = time.time()
                 with torch.no_grad():
                     for val_batch_idx, (inputs, targets, input_lengths, target_lengths) in enumerate(val_loader):
@@ -438,8 +480,11 @@ def train_model(
                         val_loss = criterion(outputs, targets, adjusted_lengths, target_lengths)
                         total_val_loss += val_loss.item()
 
-                        wer_logits = outputs.detach().permute(1, 2, 0)
-                        val_word_errors, val_ref_words = batch_word_errors_and_count(wer_logits, targets, target_lengths)
+                        # Validation WER: LM beam search
+                        lm_logits = outputs.detach().permute(1, 2, 0)
+                        val_word_errors, val_ref_words = batch_word_errors_and_count_lm(
+                            lm_logits, targets, target_lengths, lm_decoder, beam_width=beam_width
+                        )
                         total_val_word_errors += val_word_errors
                         total_val_ref_words += val_ref_words
 
@@ -452,7 +497,7 @@ def train_model(
                                 f"Epoch {epoch+1}/{num_epochs} | "
                                 f"Val   {val_batch_number:>4}/{len(val_loader)} ({progress:5.1f}%) | "
                                 f"Loss: {val_loss.item():.4f} | Avg: {running_val_avg_loss:.4f} | "
-                                f"WER: {running_val_wer:.2f}%"
+                                f"WER (LM): {running_val_wer:.2f}%"
                             )
 
                 avg_val_loss = total_val_loss / len(val_loader)
@@ -467,7 +512,7 @@ def train_model(
                 print(
                     f"Epoch {epoch+1}/{num_epochs} complete | "
                     f"Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | "
-                    f"Train WER: {avg_train_wer:.2f}% | Val WER: {avg_val_wer:.2f}% | "
+                    f"Train WER (greedy): {avg_train_wer:.2f}% | Val WER (LM): {avg_val_wer:.2f}% | "
                     f"LR: {current_lr:.2e} | "
                     f"Epoch Time: {_format_seconds(epoch_duration)} | "
                     f"Val Time: {_format_seconds(val_duration)} | "
@@ -521,7 +566,7 @@ def train_model(
                     _save_checkpoint(best_ckpt_path, _build_inference_payload(
                         base_model, R, epoch, best_val_loss, best_val_wer, run_id
                     ))
-                    print(f"New best checkpoint (val WER: {avg_val_wer:.2f}%): {best_ckpt_path}")
+                    print(f"New best checkpoint (val WER LM: {avg_val_wer:.2f}%): {best_ckpt_path}")
 
                 if save_every > 0 and ((epoch + 1) % save_every == 0):
                     epoch_ckpt_path = run_dir / f"epoch_{epoch + 1:03d}.pt"
@@ -556,12 +601,18 @@ if __name__ == "__main__":
     parser.add_argument("--save-every", type=int, default=10)
     parser.add_argument("--output-dir", default="outputs/quartznet", help="Base output dir; run saved to <output-dir>/<run-id>/")
     parser.add_argument("--no-compile", action="store_true")
+    parser.add_argument("--arpa", default=DEFAULT_ARPA, help="Path to .arpa LM file")
+    parser.add_argument("--beam-width", type=int, default=100)
+    parser.add_argument("--lm-alpha", type=float, default=0.5)
+    parser.add_argument("--lm-beta", type=float, default=1.5)
     args = parser.parse_args()
 
     errors = []
 
     if not root:
         errors.append("ROOT is not set. Add it to your environment or .env file.")
+    if not Path(args.arpa).exists():
+        errors.append(f"--arpa: file not found: {args.arpa}")
 
     if args.resume is not None:
         resume_path = Path(args.resume)
@@ -599,4 +650,8 @@ if __name__ == "__main__":
             "spec_augment": False,
             "spec_cutout": True,
         },
+        arpa_path=args.arpa,
+        beam_width=args.beam_width,
+        lm_alpha=args.lm_alpha,
+        lm_beta=args.lm_beta,
     )

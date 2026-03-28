@@ -31,7 +31,7 @@ from model_spec import write_training_config
 load_dotenv()
 root = os.getenv("ROOT")
 
-DEFAULT_ARPA = "/home/xz/GOATS422/Notarius/model/lm/6gram.arpa"
+DEFAULT_ARPA = "lm/6gram.arpa"
 
 
 def _build_lm_decoder(arpa_path, alpha=0.5, beta=1.5, beam_width=100):
