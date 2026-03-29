@@ -127,6 +127,38 @@ def collate_fn_cutout(batch):
     return tensors, targets, input_lengths, target_lengths
 
 
+def collate_fn_cutout_speed(batch):
+    """Apply speed perturbation AND cutout augmentation.
+
+    Order of operations:
+    1. Speed perturbation (on waveform)
+    2. Mel spectrogram computation
+    3. Padding
+    4. Cutout (on padded spectrogram)
+    """
+    waveforms, _, transcripts, *_ = zip(*batch)
+
+    # Step 1: Apply speed perturbation to waveforms
+    waveforms = [speed_perturb(w)[0] for w in waveforms]
+
+    # Step 2: Compute mel features
+    feats = [spec_transform(w).squeeze(0).transpose(0, 1) for w in waveforms]
+
+    # Step 3: Pad sequences
+    input_lengths = torch.tensor([f.shape[0] for f in feats], dtype=torch.long)
+    tensors = pad_sequence(feats, batch_first=True).transpose(1, 2).contiguous()
+
+    # Step 4: Apply cutout to padded spectrograms
+    tensors = _spec_square_cutout(tensors)
+
+    # Encode transcripts
+    encoded = [torch.tensor(encode(t), dtype=torch.long) for t in transcripts]
+    target_lengths = torch.tensor([len(e) for e in encoded], dtype=torch.long)
+    targets = pad_sequence(encoded, batch_first=True, padding_value=0)
+
+    return tensors, targets, input_lengths, target_lengths
+
+
 
 def get_dataset_lengths(dataset):
     """Read audio lengths in frames, cached to disk after the first run."""
