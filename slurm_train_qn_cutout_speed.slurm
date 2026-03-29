@@ -24,7 +24,7 @@ which python
 python -c "import torch; print(torch.__version__)"
 nvidia-smi
 
-torchrun --standalone --nproc_per_node=4 model/train_qn_cutout.py \
+torchrun --standalone --nproc_per_node=4 model/train_qn_cutout_speed.py \
   --epochs 50 \
   --B 5 \
   --R 5 \
