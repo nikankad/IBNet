@@ -29,4 +29,6 @@ torchrun --standalone --nproc_per_node=2 model/train_notarius_cutout_speed.py \
   --batch-size 180 \
   --output-dir outputs/notarius \
   --log-aug-speed \
-  --num-workers 8
+  --num-workers 8 \
+  --log-aug-speed \
+  --log-aug-speccutout 
