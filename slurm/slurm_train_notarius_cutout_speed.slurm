@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=notarius-cutout-lm
+#SBATCH --job-name=notarius-train
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -11,15 +11,15 @@
 
 cd "$HOME/Notarius" || exit 1
 
-eval "$(~/miniconda3/bin/conda shell.bash hook)"
-conda activate NotariusConda
+source ~/.bashrc
+source Notariusvenv/bin/activate
 
 python --version
 which python
 python -c "import torch; print(torch.__version__)"
 nvidia-smi
 
-torchrun --standalone --nproc_per_node=2 model/train_notarius_cutout_lm.py \
+torchrun --standalone --nproc_per_node=2 model/train_notarius_cutout_speed.py \
   --epochs 50 \
   --R 3 \
   --C 192 \
@@ -28,9 +28,7 @@ torchrun --standalone --nproc_per_node=2 model/train_notarius_cutout_lm.py \
   --warmup 2 \
   --batch-size 180 \
   --output-dir outputs/notarius \
+  --log-aug-speed \
+  --log-aug-speccutout \
   --num-workers 8 \
-  --arpa model/lm/6gram.arpa \
-  --beam-width 100 \
-  --lm-alpha 0.5 \
-  --lm-beta 1.5
-
+  --resume /home/nikan.kadkhodazadeh/Notarius/outputs/notarius/notarius-speed-cutout-242823/last.pt 

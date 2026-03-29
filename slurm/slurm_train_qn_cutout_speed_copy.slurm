@@ -24,13 +24,14 @@ which python
 python -c "import torch; print(torch.__version__)"
 nvidia-smi
 
-torchrun --standalone --nproc_per_node=4 model/train_qn.py \
+torchrun --standalone --nproc_per_node=4 model/train_qn_cutout_speed.py \
   --epochs 50 \
   --B 10 \
   --R 5 \
   --lr 0.005 \
   --warmup 2 \
   --batch-size 180 \
-  --resume /home/nikan.kadkhodazadeh/Notarius/outputs/quartznet/quartznet-10x5-242790/last.pt \
   --output-dir outputs/quartznet \
   --num-workers 8\
+  --log-aug-speed \
+  --log-aug-speccutout 
