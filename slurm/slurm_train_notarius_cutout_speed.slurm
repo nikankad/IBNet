@@ -26,7 +26,7 @@ torchrun --standalone --nproc_per_node=2 model/train_notarius_cutout_speed.py \
   --expand 2 \
   --lr 0.005 \
   --warmup 2 \
-  --batch-size 180 \
+  --batch-size 720 \
   --output-dir outputs/notarius \
   --log-aug-speed \
   --log-aug-speccutout \
