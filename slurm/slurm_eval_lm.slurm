@@ -8,6 +8,7 @@
 #SBATCH --time=08:00:00
 #SBATCH --gres=gpu:a100:1,gpumem:40G
 #SBATCH --output=logs/slurm-%j.out
+#SBATCH --exclude=node-g105
 
 cd "$HOME/Notarius" || exit 1
 
@@ -17,6 +18,8 @@ conda activate NotariusConda
 python --version
 which python
 nvidia-smi
+
+export ROOT="$HOME/Notarius/datasets"
 
 RESULTS_CSV="outputs/eval_results.csv"
 ARPA="model/lm/6gram.arpa"
